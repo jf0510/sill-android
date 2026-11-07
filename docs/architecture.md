@@ -29,6 +29,10 @@ identify this adaptation. The launcher icon is independent artwork created for t
 No source from the independently maintained Omar/Amine or Rahim Android clients
 was imported into this initial snapshot.
 
+The connection page follows upstream `ConnectLayout`: a centered column at most
+380 dp wide, with 10 dp grid spacing and a 92 dp preview band. Tablet cards do not
+stretch to fill the screen or enforce a square aspect ratio.
+
 The session hello advertises upstream compatibility version `0.6.0` for the
 Mac's device-version gate; its `build` field carries this Android client's own
 version. The two release numbering schemes are independent.
@@ -56,8 +60,6 @@ avoid repeatedly requesting keyframes from the host.
   and decoder capabilities vary across Android vendors.
 - The Android transport is LAN TLS/TCP. AWDL and Apple USB pairing are absent.
 - Unsupported Retina-sized pictures can trigger a shared host resolution change.
-- Tablet grids use a wider maximum column width than the upstream compact grid
-  and preserve square cards as their width increases.
 - Gesture details, keyboard composition, settings acknowledgement, menu merging,
   cursor shapes, and discovery address refresh still need parity work.
 - Source recovery uses fixed grace periods; it does not yet reproduce all

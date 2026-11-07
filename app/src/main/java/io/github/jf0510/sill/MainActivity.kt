@@ -137,13 +137,9 @@ private fun ConnectScreen(client: SillClient, s: ClientState) {
     Box(Modifier.fillMaxSize().imePadding()) {
         Column(
             Modifier.align(Alignment.Center)
-                .widthIn(
-                    max =
-                        if (tablet && tiles && !adding && s.pairing == null) 760.dp
-                        else compactColumn
-                )
+                .widthIn(max = compactColumn)
                 .fillMaxWidth()
-                .padding(horizontal = if (tablet) 16.dp else 10.dp)
+                .padding(horizontal = 10.dp)
                 .padding(top = 16.dp, bottom = 64.dp)
                 .verticalScroll(connectionScroll),
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -331,11 +327,9 @@ private fun HostCard(
 ) {
     var menu by remember { mutableStateOf(false) }
     if (tiles) {
-        val tablet = LocalConfiguration.current.smallestScreenWidthDp >= 600
         Box {
             Column(
                 Modifier.fillMaxWidth()
-                    .then(if (tablet) Modifier.aspectRatio(1f) else Modifier)
                     .clip(RoundedCornerShape(12.dp))
                     .background(Palette.control)
                     .border(1.dp, Color.White.copy(alpha = .08f), RoundedCornerShape(12.dp))
@@ -347,7 +341,7 @@ private fun HostCard(
             ) {
                 Box(
                     Modifier.fillMaxWidth()
-                        .then(if (tablet) Modifier.weight(1f) else Modifier.height(92.dp))
+                        .height(92.dp)
                         .background(Palette.muted.copy(alpha = .12f)),
                     contentAlignment = Alignment.Center,
                 ) {

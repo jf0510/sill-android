@@ -75,15 +75,16 @@ adb shell am start -n io.github.jf0510.sill/.MainActivity --ez preview true
 
 The preview has no live video and does not replace device interoperability tests.
 
-To reproduce the README connection screenshots with synthetic host names:
+To reproduce the README tablet connection screenshot with synthetic host names:
 
 ```sh
 adb shell am force-stop io.github.jf0510.sill
 adb shell am start -n io.github.jf0510.sill/.MainActivity --ez previewHome true
 ```
 
-The README phone capture was taken on a Pixel 6 at its native 1080 × 2400
-resolution and 420 dpi. The tablet capture was taken on a Xiaomi Pad 7 in
-landscape at 3200 × 2136 and 440 dpi. `previewHome` overrides the displayed
-connection state only in debug builds; release builds ignore it. These are UI
-captures, not evidence of a connected video session or physical-device performance.
+The README phone image is a user-provided Pixel 6 capture of a live desktop
+session. The tablet capture was taken on a Xiaomi Pad 7 in landscape at
+3200 × 2136 and 440 dpi. `previewHome` overrides the displayed connection state
+only in debug builds; release builds ignore it. The connection preview is a UI
+capture, not evidence of a live video session. Neither screenshot establishes
+frame pacing or latency.

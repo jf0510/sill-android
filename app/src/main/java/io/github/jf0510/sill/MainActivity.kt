@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -169,9 +170,11 @@ private fun ConnectScreen(client: SillClient, s: ClientState) {
                 )
                 OutlinedTextField(
                     code,
-                    { code = it },
+                    { code = PairingCodeInput.digits(it) },
                     label = { Text("Pairing code") },
                     placeholder = { Text("0000 0000 0000") },
+                    visualTransformation = PairingCodeInput,
+                    textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),

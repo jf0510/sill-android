@@ -20,6 +20,7 @@ assert complete feature parity.
 | `VideoDecoder.kt` | MediaCodec hardware decoding and bounded input queue | `HEVCDisplayView.swift` behavior; Android-specific implementation |
 | `ResolutionFallback.kt` | One-shot Standard-resolution fallback | Android decoder-size handling |
 | `TouchSurface.kt` | SurfaceView, touch mapping, trackpad, zoom, IME | `InputOverlayView`, `TrackpadView` |
+| `PairingCodeInput.kt` | Four-digit code grouping and cursor mapping | `AddMacCard.swift` / `PairingField.grouped` |
 | `MainActivity.kt` | Compose layouts, connection screen, stream controls | `StreamScreen`, `PhonePortraitLayout`, portrait layouts |
 
 The Swift behaviors were translated and adapted to Kotlin, Android lifecycle

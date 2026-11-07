@@ -1,0 +1,22 @@
+Sill Android
+Copyright 2026 John Fu and contributors
+
+This project is an unofficial Android client for Sill. It is not affiliated
+with, endorsed by, or maintained by Sill's author.
+
+Sill
+Copyright 2026 Noah Saffer
+https://github.com/Saffsanity/sill
+Licensed under the Apache License, Version 2.0.
+
+The Android implementation is based on upstream commit
+41e8cb8801f8e9d387e27a0d498dee193d17e9ec.
+Protocol definitions, pairing behavior, interface specifications, and recovery
+policies were adapted from Sources/StreamProtocol and iOSClient. The Swift
+behaviors were translated into Kotlin and integrated with Android platform APIs.
+The Android layout, lifecycle, input handling, TLS integration, MediaCodec
+pipeline, tests, and build configuration contain modifications and additions.
+See docs/architecture.md for the source mapping and known differences.
+
+The Sill name is used to identify protocol compatibility and upstream origin.
+The Android launcher icon is independent artwork created for this project.

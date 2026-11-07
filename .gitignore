@@ -1,0 +1,32 @@
+# Build output and local tooling
+.gradle/
+.kotlin/
+.tools/
+**/build/
+*.apk
+*.aab
+*.apks
+*.hprof
+local.properties
+
+# IDE and operating-system files
+.idea/
+*.iml
+.DS_Store
+
+# Signing material and local configuration
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+.env
+.env.*
+
+# Private device captures and development logs
+verification/
+*.log
+captures/
+
+# Local release staging
+/release/

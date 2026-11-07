@@ -29,3 +29,10 @@ Generation prompt:
 ```text
 PRECISE LOCAL EDIT. Image 1 is the ORIGINAL Sill app icon and MUST be the base image. Image 2 is ONLY a reference for the Android robot's official head shape. Preserve the ORIGINAL Sill icon's outer monitor frame, bezel, screen boundary, stand/base, placement, dimensions, corner radii, metallic gray gradients, highlights, shadows, black background, and outer margins exactly as in Image 1. Do not redesign, redraw, resize, thicken, recolor or relight any part of that original exterior. Change ONLY the CONTENT INSIDE the monitor's existing dark display area. Remove the entire small tilted tablet and document that currently appear inside that display. In their place, directly inside the same screen area, place a precisely shaped light-gray/white Android robot upper-body bust, subtly tilted counterclockwise, with full head and antennae, correct dark oval eyes copied in proportion from Image 2, a simple rounded upper torso and capsule arms. No legs. Grayscale, no green or blue. Robot is fully confined to the original dark screen and may be clipped along its lower screen edge; never cover, alter, or extend onto the original bezel. No second frame, no inner tablet, no inner box, no text. This must look like the SAME original Sill icon with different content playing on its screen, NOT a new monitor icon. Match the original square canvas and exact exterior composition; only the original screen content may change.
 ```
+
+## Android launcher presentation
+
+The launcher uses an adaptive icon with a black background and the unchanged
+raster artwork inset by 16.67% in its foreground layer. This fills the launcher
+mask without the white backing applied to legacy square icons. Both `icon` and
+`roundIcon` reference the adaptive resource. The README retains the square artwork.

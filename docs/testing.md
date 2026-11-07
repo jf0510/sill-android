@@ -103,3 +103,8 @@ private or be redacted before sharing.
 
 The recovery follows Android's [codec-specific data guidance](https://developer.android.com/reference/android/media/MediaCodec#CSD):
 a flush before the first output can discard configuration supplied at startup.
+
+Pixel 6 also produced output in three cold-launch connections using the 0.1.13
+release build without pressing Desktop. These runs did not exercise an early
+decoder flush. The adaptive icon was checked in Pixel Launcher's app search;
+the black background fills the circular mask and the monitor retains a margin.

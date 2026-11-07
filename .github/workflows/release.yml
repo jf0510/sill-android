@@ -78,7 +78,7 @@ jobs:
           set -euo pipefail
           version="${RELEASE_TAG#v}"
           gh release create "$RELEASE_TAG" --verify-tag \
-            --title "Sill for Android $version" \
+            --title "$RELEASE_TAG" \
             --notes-file "docs/releases/$version.md" \
             release/*.apk release/SHA256SUMS.txt
       - name: Remove signing material

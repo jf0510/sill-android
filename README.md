@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/logo.png" alt="Sill for Android logo: grayscale Android robot in a monitor" width="160">
+</p>
+
 # Sill for Android
 
 An **unofficial, experimental Android client** for [Sill](https://github.com/Saffsanity/sill).
@@ -137,7 +141,10 @@ information; redact these before sharing a bug report.
 [Apache License 2.0](LICENSE). Sill was created by **Noah Saffer**.
 This Android implementation adapts the upstream protocol and interface behavior
 from commit `41e8cb8801f8e9d387e27a0d498dee193d17e9ec`.
-The Android launcher icon is independent artwork; the upstream icon is not included.
+The launcher icon and project logo adapt the upstream Sill icon with a grayscale
+Android robot. See [icon sources and attribution](docs/branding.md).
+
+The Android robot is reproduced or modified from work created and shared by Google and used according to terms described in the Creative Commons 3.0 Attribution License (https://creativecommons.org/licenses/by/3.0/).
 
 See [NOTICE](NOTICE) for upstream attribution and modifications, and
 [third-party notices](app/src/main/assets/THIRD_PARTY_NOTICES.txt) for dependencies.

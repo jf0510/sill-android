@@ -25,7 +25,8 @@ assert complete feature parity.
 
 The Swift behaviors were translated and adapted to Kotlin, Android lifecycle
 callbacks, Compose, MediaCodec, and Android Keystore. Source headers and NOTICE
-identify this adaptation. The launcher icon is independent artwork created for this Android client.
+identify this adaptation. The launcher icon modifies the upstream artwork with an Android robot; see
+[branding](branding.md) for the separate artwork attributions.
 No source from the independently maintained Omar/Amine or Rahim Android clients
 was imported into this initial snapshot.
 

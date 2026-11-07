@@ -19,4 +19,12 @@ pipeline, tests, and build configuration contain modifications and additions.
 See docs/architecture.md for the source mapping and known differences.
 
 The Sill name is used to identify protocol compatibility and upstream origin.
-The Android launcher icon is independent artwork created for this project.
+The Android launcher icon and project logo are modified from the upstream icon
+iOSClient/Assets.xcassets/AppIcon.appiconset/AppIcon.png, Copyright 2026 Noah Saffer.
+The inner tablet and document have been replaced with a grayscale Android robot
+upper body. The original monitor composition is retained.
+
+The Android robot is reproduced or modified from work created and shared by
+Google and used according to terms described in the Creative Commons 3.0
+Attribution License (https://creativecommons.org/licenses/by/3.0/).
+See docs/branding.md for image sources and asset production details.

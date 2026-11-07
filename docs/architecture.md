@@ -56,7 +56,8 @@ avoid repeatedly requesting keyframes from the host.
   and decoder capabilities vary across Android vendors.
 - The Android transport is LAN TLS/TCP. AWDL and Apple USB pairing are absent.
 - Unsupported Retina-sized pictures can trigger a shared host resolution change.
-- Tablet grids use a wider maximum column width than the upstream compact grid.
+- Tablet grids use a wider maximum column width than the upstream compact grid
+  and preserve square cards as their width increases.
 - Gesture details, keyboard composition, settings acknowledgement, menu merging,
   cursor shapes, and discovery address refresh still need parity work.
 - Source recovery uses fixed grace periods; it does not yet reproduce all

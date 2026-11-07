@@ -331,9 +331,11 @@ private fun HostCard(
 ) {
     var menu by remember { mutableStateOf(false) }
     if (tiles) {
+        val tablet = LocalConfiguration.current.smallestScreenWidthDp >= 600
         Box {
             Column(
                 Modifier.fillMaxWidth()
+                    .then(if (tablet) Modifier.aspectRatio(1f) else Modifier)
                     .clip(RoundedCornerShape(12.dp))
                     .background(Palette.control)
                     .border(1.dp, Color.White.copy(alpha = .08f), RoundedCornerShape(12.dp))
@@ -345,7 +347,7 @@ private fun HostCard(
             ) {
                 Box(
                     Modifier.fillMaxWidth()
-                        .height(92.dp)
+                        .then(if (tablet) Modifier.weight(1f) else Modifier.height(92.dp))
                         .background(Palette.muted.copy(alpha = .12f)),
                     contentAlignment = Alignment.Center,
                 ) {

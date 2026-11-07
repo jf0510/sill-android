@@ -20,9 +20,16 @@ performance. See [testing](docs/testing.md) for scope and limitations.
 
 ## Screenshots
 
-Connection screen captured on a Pixel 6. Host names are synthetic demonstration data.
+Connection screens captured on a Pixel 6 and Xiaomi Pad 7.
+Host names are synthetic demonstration data.
 
-<img src="docs/images/phone.png" alt="Pixel 6 connection screen with two Mac cards" width="280">
+<table>
+  <tr><th>Pixel 6</th><th>Xiaomi Pad 7</th></tr>
+  <tr>
+    <td><img src="docs/images/phone.png" alt="Pixel 6 connection screen with two Mac cards" width="240"></td>
+    <td><img src="docs/images/tablet.png" alt="Xiaomi Pad 7 landscape connection screen with square Mac cards" width="560"></td>
+  </tr>
+</table>
 
 ## Requirements
 

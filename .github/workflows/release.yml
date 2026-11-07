@@ -77,12 +77,10 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
-          flags=()
-          if [[ "$version" == 0.* ]]; then flags+=(--prerelease); fi
           gh release create "$RELEASE_TAG" --verify-tag \
             --title "Sill for Android $version" \
             --notes-file "docs/releases/$version.md" \
-            "${flags[@]}" release/*.apk release/SHA256SUMS.txt
+            release/*.apk release/SHA256SUMS.txt
       - name: Remove signing material
         if: always()
         run: rm -f "$RUNNER_TEMP/sill-release.p12"

@@ -43,8 +43,10 @@ Release publication is triggered by a `vMAJOR.MINOR.PATCH` tag. Update
 `versionName` and increment `versionCode` in `app/build.gradle.kts`, add matching
 notes in `docs/releases/MAJOR.MINOR.PATCH.md`, and complete the checks above before
 pushing the tag. The workflow verifies that the APK version matches the tag,
-signs the APK, and publishes it with a SHA-256 checksum. Versions beginning with
-`0.` are marked as prereleases. Ordinary commits do not publish a release.
+signs the APK, and publishes it with a SHA-256 checksum. Releases are published
+as regular GitHub releases so the latest version appears in the repository
+sidebar. The 0.x client remains experimental; state this in the release notes.
+Ordinary commits do not publish a release.
 If infrastructure fails before publication, the Release APK workflow can be
 started manually from `main` with the existing tag; it checks out that tag
 and never replaces an existing release.

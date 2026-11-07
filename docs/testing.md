@@ -9,10 +9,12 @@ python3 tools/format.py --check
 
 Tests cover binary framing and fragmented reads, Swift-compatible control JSON,
 pairing reference vectors, HEVC NAL bounds, resolution fallback, source recovery,
-reconnection, keyframe retry policy, and pointer-move ordering. JVM tests do not
+reconnection, keyframe retry policy, pointer-move ordering, and pairing-code
+grouping with cursor offsets. JVM tests do not
 exercise the device's TLS provider, MediaCodec implementation, or Android UI.
 
-The release build is unsigned. Successful assembly does not establish hardware
+Local release assembly produces an unsigned APK; the release workflow signs it
+before publication. Successful assembly does not establish hardware
 compatibility, security assurance, or store readiness.
 
 ## Development device coverage
@@ -72,3 +74,15 @@ adb shell am start -n io.github.jf0510.sill/.MainActivity --ez preview true
 ```
 
 The preview has no live video and does not replace device interoperability tests.
+
+To reproduce the README connection screenshots with synthetic host names:
+
+```sh
+adb shell am force-stop io.github.jf0510.sill
+adb shell am start -n io.github.jf0510.sill/.MainActivity --ez previewHome true
+```
+
+The README phone capture was taken on a Pixel 6 at its native 1080 × 2400
+resolution and 420 dpi. `previewHome` overrides the displayed
+connection state only in debug builds; release builds ignore it. These are UI
+captures, not evidence of a connected video session or physical-device performance.

@@ -61,6 +61,17 @@ class MainActivity : ComponentActivity() {
         if (BuildConfig.DEBUG && intent.getBooleanExtra("preview", false)) client.preview()
         if (BuildConfig.DEBUG && intent.hasExtra("usbHostPort"))
             client.usbDiagnostic(intent.getIntExtra("usbHostPort", 0))
+        val homePreview =
+            if (BuildConfig.DEBUG && intent.getBooleanExtra("previewHome", false))
+                ClientState(
+                    status = "Choose a Mac to connect.",
+                    hosts =
+                        listOf(
+                            MacHost("MacBook Pro", "192.0.2.1", 7455),
+                            MacHost("Mac mini", "192.0.2.2", 7455),
+                        ),
+                )
+            else null
         setContent {
             MaterialTheme(
                 colorScheme =
@@ -80,7 +91,8 @@ class MainActivity : ComponentActivity() {
                         surfaceTint = Color.Transparent,
                     )
             ) {
-                val s by client.state.collectAsState()
+                val liveState by client.state.collectAsState()
+                val s = homePreview ?: liveState
                 CompositionLocalProvider(LocalContentColor provides Palette.text) {
                     Box(
                         Modifier.fillMaxSize()

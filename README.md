@@ -18,6 +18,12 @@ HEVC decoding. Frame pacing still varies with the host, network, and device.
 These observations are not a latency guarantee or a claim of iPhone-equivalent
 performance. See [testing](docs/testing.md) for scope and limitations.
 
+## Screenshots
+
+Connection screen captured on a Pixel 6. Host names are synthetic demonstration data.
+
+<img src="docs/images/phone.png" alt="Pixel 6 connection screen with two Mac cards" width="280">
+
 ## Requirements
 
 - Android 11 (API 30) or later, with a compatible HEVC decoder.

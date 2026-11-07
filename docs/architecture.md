@@ -48,7 +48,10 @@ Video frames are passed to a dedicated display-priority HandlerThread. All
 MediaCodec calls run there. Input-buffer acquisition is nonblocking; temporary
 backpressure retains a compressed frame instead of breaking the HEVC reference
 chain. The compressed backlog is limited to 32 frames. Queue overflow or codec
-failure opens keyframe recovery. Output is released directly to a SurfaceView.
+failure opens keyframe recovery. After a decoder flush, HEVC parameter sets are
+queued with `BUFFER_FLAG_CODEC_CONFIG` before subsequent video frames. This
+restores initialization data that Android can discard during an early flush.
+Output is released directly to a SurfaceView.
 
 Only absolute pointer moves are coalesced, at an 8 ms interval. Other inputs
 flush a pending move before sending their own event. Recovery requests wait at

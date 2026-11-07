@@ -75,16 +75,31 @@ adb shell am start -n io.github.jf0510.sill/.MainActivity --ez preview true
 
 The preview has no live video and does not replace device interoperability tests.
 
-To reproduce the README tablet connection screenshot with synthetic host names:
+A debug-only connection preview uses synthetic host names:
 
 ```sh
 adb shell am force-stop io.github.jf0510.sill
 adb shell am start -n io.github.jf0510.sill/.MainActivity --ez previewHome true
 ```
 
-The README phone image is a user-provided Pixel 6 capture of a live desktop
-session. The tablet capture was taken on a Xiaomi Pad 7 in landscape at
-3200 × 2136 and 440 dpi. `previewHome` overrides the displayed connection state
-only in debug builds; release builds ignore it. The connection preview is a UI
-capture, not evidence of a live video session. Neither screenshot establishes
-frame pacing or latency.
+The README screenshots are user-provided captures of live desktop sessions on
+Pixel 6 and Xiaomi Pad 7. They illustrate the UI, not measured frame pacing or
+latency. `previewHome` overrides connection state only in debug builds; release
+builds ignore it.
+
+## Decoder startup regression
+
+In 0.1.12, Xiaomi Pad 7 was checked through three cold launches and connections
+to a paired Mac without selecting Desktop manually. Each produced decoded output;
+one exercised an early decoder flush and subsequent HEVC configuration resubmission.
+The pre-fix failure received frames continuously but produced no decoded output.
+This is a focused regression check, not a general latency or stability benchmark.
+
+To repeat the check, launch the app, connect to a paired Mac, and verify the picture
+appears without pressing Desktop. In local logs, `Resubmitted HEVC configuration`
+identifies the recovery path and `First picture rendered` identifies output handed
+to the surface. Confirm the visible picture as well. Raw device logs should remain
+private or be redacted before sharing.
+
+The recovery follows Android's [codec-specific data guidance](https://developer.android.com/reference/android/media/MediaCodec#CSD):
+a flush before the first output can discard configuration supplied at startup.

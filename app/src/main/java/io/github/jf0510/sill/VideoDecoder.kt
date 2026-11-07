@@ -30,6 +30,7 @@ class VideoDecoder(
     private var surface: Surface? = null
     private var config: Hevc.Config? = null
     private var configBytes: ByteArray? = null
+    private var codecConfigPending = false
     private var waiting = true
     private var suspended = false
     private val pending = AtomicInteger(0)
@@ -211,7 +212,12 @@ class VideoDecoder(
             lost = false
             waiting = true
             recoveryPts = null
-            codec?.flush()
+            codec?.let {
+                it.flush()
+                // A flush before the first output can discard the CSD supplied to configure().
+                // Submit it again before any video access unit, including during startup recovery.
+                codecConfigPending = true
+            }
             onNeedsKeyframe()
         }
         if (codec == null) start()
@@ -223,6 +229,17 @@ class VideoDecoder(
                 }
         val cfg = config ?: return
         drainOutput()
+        if (codecConfigPending) {
+            val index = c.dequeueInputBuffer(0)
+            if (index < 0) return
+            val buffer = requireNotNull(c.getInputBuffer(index))
+            require(buffer.capacity() >= cfg.csd.size) { "Video configuration is too large." }
+            buffer.clear()
+            buffer.put(cfg.csd)
+            c.queueInputBuffer(index, 0, cfg.csd.size, 0, MediaCodec.BUFFER_FLAG_CODEC_CONFIG)
+            codecConfigPending = false
+            Log.i("SillVideo", "Resubmitted HEVC configuration after decoder flush")
+        }
         while (frames.isNotEmpty()) {
             val next = frames.first
             if (next.epoch != epoch.get() || waiting && !next.key) {
@@ -415,6 +432,7 @@ class VideoDecoder(
             runCatching { it.release() }
         }
         codec = null
+        codecConfigPending = false
         waiting = true
         recoveryPts = null
     }

@@ -3,12 +3,21 @@ name: Release APK
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to publish
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -19,13 +28,16 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          ref: refs/tags/${{ env.RELEASE_TAG }}
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
       - name: Install Android SDK packages
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools platforms;android-36 build-tools;36.0.0
       - name: Test, lint, and build
         run: |
           python3 tools/format.py --check
@@ -34,8 +46,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          version="${GITHUB_REF_NAME#v}"
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version="${RELEASE_TAG#v}"
           metadata="$("$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging app/build/outputs/apk/release/app-release-unsigned.apk)"
           [[ "$metadata" == *"versionName='$version'"* ]]
           [[ -f "docs/releases/$version.md" ]]
@@ -51,7 +63,7 @@ jobs:
           trap 'rm -f "$keyfile"' EXIT
           printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$keyfile"
           mkdir -p release
-          apk="release/sill-android-${GITHUB_REF_NAME#v}.apk"
+          apk="release/sill-android-${RELEASE_TAG#v}.apk"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign \
             --ks "$keyfile" --ks-key-alias sill-release \
             --ks-pass env:RELEASE_STORE_PASSWORD --key-pass env:RELEASE_STORE_PASSWORD \
@@ -64,10 +76,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_TAG#v}"
           flags=()
           if [[ "$version" == 0.* ]]; then flags+=(--prerelease); fi
-          gh release create "$GITHUB_REF_NAME" --verify-tag \
+          gh release create "$RELEASE_TAG" --verify-tag \
             --title "Sill for Android $version" \
             --notes-file "docs/releases/$version.md" \
             "${flags[@]}" release/*.apk release/SHA256SUMS.txt

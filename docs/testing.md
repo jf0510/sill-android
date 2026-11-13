@@ -108,3 +108,42 @@ Pixel 6 also produced output in three cold-launch connections using the 0.1.13
 release build without pressing Desktop. These runs did not exercise an early
 decoder flush. The adaptive icon was checked in Pixel Launcher's app search;
 the black background fills the circular mask and the monitor retains a margin.
+
+## 0.2.0 validation (2026-11-14)
+
+Automated: 47 JVM regression tests (all passed), lint, ktfmt, debug/release assembly. Added tests
+cover signed address verification and pin mismatch, QR identity/field validation,
+UTF-8/JSON clipboard caps, audio packet truncation and unknown types, the actual
+AudioToolbox AAC-ELD descriptor cookie, idle expiry, capability gates, retained
+routes, and recovery waits on a slow link.
+
+Device: Xiaomi Pad 7 (Android 16), debug build upgraded with its existing debug
+key. Upstream `bf69067` SillHost was built locally and run with `--synthetic
+--pairing --remote=17455 --audio --off-console-view`, with two synthetic displays
+and a separate test pasteboard, over `adb reverse tcp:17455 tcp:17455`.
+
+Observed: confirmed pairing-link flow, decoded video, both Desktop stops,
+full-screen entry and left-edge return, system PiP entry, active 48 kHz stereo
+AudioTrack after extracting the AAC AudioSpecificConfig, and the off-console
+view's explanatory banner while input/audio are suppressed. Tablet portrait and
+phone-size layout previews were inspected; temporary display settings were restored.
+
+The opt-in instrumentation gate exercises a previously paired **loopback test
+host only**: video availability, display stepping, clipboard receipt and paste,
+IME composition/commit, hardware key down/release, settings acknowledgement and continued connection.
+A second run also checked Mac-to-Android text using the synthetic host’s named
+pasteboard and the instrumentation argument `-e hostClipboard`.
+It must never be pointed at a normal desktop host. To repeat after pairing:
+
+```sh
+./gradlew :app:assembleDebug :app:assembleDebugAndroidTest
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb shell am instrument -w -e syntheticPort 17455 \
+  io.github.jf0510.sill.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+Without `syntheticPort`, the live test is skipped. Unit tests and CI do not imply
+physical keyboard/stylus, camera focus/QR capture, real VPN/WAN or audible quality
+coverage. Pixel 6 was not connected during this release. The tested stream was a
+synthetic pattern; no private desktop screenshots or pairing material are committed.

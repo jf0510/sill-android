@@ -1,7 +1,7 @@
 # Architecture and provenance
 
 The Android client uses Sill's existing generation-1 wire protocol without
-modifying the Mac host. The implementation is based on upstream commit
+modifying the Mac host. The initial implementation is based on upstream commit
 [`41e8cb8`](https://github.com/Saffsanity/sill/tree/41e8cb8801f8e9d387e27a0d498dee193d17e9ec).
 
 ## Source mapping
@@ -38,6 +38,30 @@ The session hello advertises upstream compatibility version `0.6.0` for the
 Mac's device-version gate; its `build` field carries this Android client's own
 version. The two release numbering schemes are independent.
 
+## 0.2.0 parity update
+
+The additional protocol and behavior reference is upstream
+[`bf69067`](https://github.com/Saffsanity/sill/tree/bf69067fe60348bfcf3d617086a8589fbdf8dbb6)
+(main/0.6.2 development, including released 0.6.1 behavior).
+
+- `ParityPolicy.kt`: idle hold, lock/view capabilities, clipboard byte limits,
+  bounded audio packet parsing and AudioToolbox ES descriptor unwrapping.
+- `AudioOutput.kt`: bounded MediaCodec AAC-ELD worker, epoch/sequence recovery,
+  priming trim, AudioTrack and audio focus. Unsupported/failed decoding is reported.
+- `RemoteInfo.kt`, `PairLink.kt`: signed host addresses bound to the saved SPKI,
+  replay timestamp, discovery recognition tags, QR/link identity and mutual proof.
+- `HardwareInput.kt`, `TouchSurface.kt`: HID mapping and release, mouse/wheel,
+  stylus drag/hover, chord gestures, cursor images and local IME composition.
+- `SillClient.kt`: clipboard subscription/receipt-before-paste, display stepping,
+  off-console viewing, settings acknowledgements and menu response merging.
+- `MainActivity.kt`: idle hold, PiP/full-screen lifecycle, tour, phone picture size,
+  QR scanner and device controls. The camera is used by ZXing only on request.
+
+Capability negotiation is additive: no kind 47 or gesture is sent to a host that
+has not advertised it; clipboard is subscribed only when advertised. The hello
+advertises offConsoleView generation 1 and AAC-ELD only if the device supports it.
+The compatibility version remains 0.6.0; it is not the Android release number.
+
 ## Threads and data flow
 
 The session reads framed TLS messages on an IO coroutine. Writes use a serial
@@ -64,9 +88,9 @@ avoid repeatedly requesting keyframes from the host.
   and decoder capabilities vary across Android vendors.
 - The Android transport is LAN TLS/TCP. AWDL and Apple USB pairing are absent.
 - Unsupported Retina-sized pictures can trigger a shared host resolution change.
-- Gesture details, keyboard composition, settings acknowledgement, menu merging,
-  cursor shapes, and discovery address refresh still need parity work.
-- Source recovery uses fixed grace periods; it does not yet reproduce all
-  upstream RTT-dependent timing behavior.
+- Audio/video have separate clocks; decoder capability and PiP behavior vary by device.
+- Stylus pressure/tilt and platform-specific foldable geometry are not reproduced.
+- Source recovery extends its fixed minimum waits using measured RTT; Android
+  discovery and activity lifecycle remain platform-specific.
 
 These differences should remain explicit in bug reports and release notes.

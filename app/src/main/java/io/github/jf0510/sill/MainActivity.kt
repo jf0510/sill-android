@@ -3,18 +3,25 @@
 
 package io.github.jf0510.sill
 
+import android.app.PictureInPictureParams
+import android.content.res.Configuration
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -28,9 +35,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -38,6 +47,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.lifecycleScope
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 object Palette {
@@ -53,11 +70,94 @@ object Palette {
 
 class MainActivity : ComponentActivity() {
     private val client: SillClient by viewModels()
+    private val hardware by lazy { HardwareInput(client) }
+    private var active = false
+    private var inputPanelOpen = false
+
+    fun inputPanel(open: Boolean) {
+        inputPanelOpen = open
+        if (open) hardware.release()
+    }
+
+    // Activity's public Window.Callback override. AndroidX core annotates its implementation
+    // for library use, but the platform callback must intercept hardware keys before Compose.
+    @android.annotation.SuppressLint("RestrictedApi")
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (!inputPanelOpen && hardware.handle(event)) return true
+        return super.dispatchKeyEvent(event)
+    }
+
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        client.used()
+    }
+
+    fun enterPip() {
+        val s = client.state.value
+        if (
+            !client.pipEnabled ||
+                !s.connected ||
+                s.videoWidth <= 0 ||
+                s.locked ||
+                s.offConsole ||
+                !packageManager.hasSystemFeature(
+                    android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE
+                )
+        )
+            return
+        hardware.release()
+        val ratio = (s.videoWidth.toFloat() / s.videoHeight.coerceAtLeast(1)).coerceIn(0.42f, 2.38f)
+        runCatching {
+            enterPictureInPictureMode(
+                PictureInPictureParams.Builder()
+                    .setAspectRatio(android.util.Rational((ratio * 1000).toInt(), 1000))
+                    .build()
+            )
+        }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        enterPip()
+    }
+
+    override fun onPictureInPictureModeChanged(value: Boolean, config: Configuration) {
+        super.onPictureInPictureModeChanged(value, config)
+        client.pip(value)
+        if (value) client.foreground() else if (!active) client.background()
+    }
+
+    override fun onPause() {
+        hardware.release()
+        super.onPause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        client.used()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        intent?.dataString?.let { client.offerPairLink(it) }
         enableEdgeToEdge()
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        lifecycleScope.launch {
+            while (true) {
+                val s = client.state.value
+                if (
+                    ParityPolicy.awake(
+                        s.connected,
+                        s.active != null || s.desktop,
+                        active && !s.inPip,
+                        client.lastUse,
+                        android.os.SystemClock.elapsedRealtime(),
+                    )
+                )
+                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                delay(1000)
+            }
+        }
         if (BuildConfig.DEBUG && intent.getBooleanExtra("preview", false)) client.preview()
         if (BuildConfig.DEBUG && intent.hasExtra("usbHostPort"))
             client.usbDiagnostic(intent.getIntExtra("usbHostPort", 0))
@@ -93,6 +193,14 @@ class MainActivity : ComponentActivity() {
             ) {
                 val liveState by client.state.collectAsState()
                 val s = homePreview ?: liveState
+                LaunchedEffect(s.fullScreen, s.inPip, s.connected) {
+                    val controller = WindowCompat.getInsetsController(window, window.decorView)
+                    controller.systemBarsBehavior =
+                        WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    if (s.connected && (s.fullScreen || s.inPip))
+                        controller.hide(WindowInsetsCompat.Type.systemBars())
+                    else controller.show(WindowInsetsCompat.Type.systemBars())
+                }
                 CompositionLocalProvider(LocalContentColor provides Palette.text) {
                     Box(
                         Modifier.fillMaxSize()
@@ -102,6 +210,25 @@ class MainActivity : ComponentActivity() {
                             )
                     ) {
                         if (s.connected) StreamScreen(client, s) else ConnectScreen(client, s)
+                        s.pairingLink?.let { link ->
+                            AlertDialog(
+                                onDismissRequest = { client.dismissPairLink() },
+                                title = { Text("Pair with ${link.name}?") },
+                                text = {
+                                    Text(
+                                        "Connect to this Mac and save its identity for future connections?"
+                                    )
+                                },
+                                confirmButton = {
+                                    TextButton(onClick = { client.pairLink() }) { Text("Pair") }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { client.dismissPairLink() }) {
+                                        Text("Cancel")
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -110,10 +237,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        active = true
         client.foreground()
     }
 
     override fun onStop() {
+        active = false
         client.background()
         super.onStop()
     }
@@ -126,6 +255,41 @@ private fun ConnectScreen(client: SillClient, s: ClientState) {
     var address by rememberSaveable { mutableStateOf("") }
     var port by rememberSaveable { mutableStateOf("7455") }
     var code by rememberSaveable { mutableStateOf("") }
+    val scanner =
+        rememberLauncherForActivityResult(ScanContract()) { result ->
+            result.contents?.let { client.offerPairLink(it) }
+        }
+    var linkText by remember { mutableStateOf("") }
+    var enterLink by remember { mutableStateOf(false) }
+    if (enterLink)
+        AlertDialog(
+            onDismissRequest = { enterLink = false },
+            title = { Text("Pairing link") },
+            text = {
+                OutlinedTextField(linkText, { linkText = it }, label = { Text("sill://pair…") })
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        client.offerPairLink(linkText)
+                        linkText = ""
+                        enterLink = false
+                    }
+                ) {
+                    Text("Continue")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        linkText = ""
+                        enterLink = false
+                    }
+                ) {
+                    Text("Cancel")
+                }
+            },
+        )
     val tablet = LocalConfiguration.current.smallestScreenWidthDp >= 600
     val compactColumn = (LocalConfiguration.current.screenWidthDp - 32).coerceIn(200, 380).dp
     val connectionScroll = rememberScrollState()
@@ -169,6 +333,27 @@ private fun ConnectScreen(client: SillClient, s: ClientState) {
                 }
             }
             Text(s.status, color = Palette.muted, fontSize = 13.sp)
+            if (s.pairing == null && !s.busy)
+                Row {
+                    TextButton(
+                        onClick = {
+                            scanner.launch(
+                                ScanOptions()
+                                    .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                                    .setBeepEnabled(false)
+                                    .setPrompt("Scan the pairing code on your Mac")
+                            )
+                        }
+                    ) {
+                        Text("Scan QR")
+                    }
+                    TextButton(onClick = { enterLink = true }) { Text("Pairing link") }
+                }
+            Text(
+                "Sill for Android ${BuildConfig.VERSION_NAME}",
+                fontSize = 12.sp,
+                color = Palette.muted,
+            )
             s.error?.let { Text(it, color = Color(0xffffb4ab), fontSize = 13.sp) }
             if (s.pairing != null) {
                 Text(
@@ -463,12 +648,73 @@ private fun StreamScreen(client: SillClient, s: ClientState) {
     var scale by rememberSaveable { mutableStateOf(1f) }
     var view by remember { mutableStateOf<TouchSurface?>(null) }
     var modifiers by rememberSaveable { mutableLongStateOf(0L) }
+    val activity = LocalActivity.current as? MainActivity
+    val hidden = s.fullScreen || s.inPip
+    var tour by remember { mutableStateOf(client.showTour) }
+    var tourStep by remember { mutableIntStateOf(0) }
+    LaunchedEffect(panel) { activity?.inputPanel(panel.isNotEmpty()) }
+    DisposableEffect(Unit) {
+        onDispose {
+            activity?.inputPanel(false)
+            client.releaseModifiers()
+        }
+    }
+    LaunchedEffect(modifiers) { client.modifierKeys = modifiers }
+    if (tour && !s.inPip) {
+        val steps =
+            listOf(
+                "Your Mac, here" to
+                    "Tap the picture to click, hold to right-click, swipe to scroll, and pinch to zoom. On tablets, rotate to portrait for the trackpad.",
+                "Trackpad and keyboard" to
+                    "Slide on the trackpad to move. Two fingers scroll or tap to right-click. Hold to drag; three fingers swipe between Spaces or open Mission Control. The Keyboard button opens your Android keyboard, including Chinese input.",
+                "Windows and displays" to
+                    "Pick a window thumbnail, or hold it for window commands. Desktop shows your Mac screen; tap it again to cycle displays when supported.",
+                "Sound and clipboard" to
+                    "Settings contains Send Audio, local Mute and Share Clipboard. Paste on Mac sends copied text when you tap it. Mac copies arrive while Sill is in the foreground.",
+                "More room" to
+                    "Settings → Full Screen hides the controls. Swipe in from the left edge, press Back, or use Show Controls to return. Enable Picture in Picture to keep watching when you go Home.",
+            )
+        AlertDialog(
+            onDismissRequest = {
+                tour = false
+                client.tourSeen()
+            },
+            title = { Text(steps[tourStep].first) },
+            text = { Text(steps[tourStep].second) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (tourStep == steps.lastIndex) {
+                            tour = false
+                            client.tourSeen()
+                        } else tourStep++
+                    }
+                ) {
+                    Text(if (tourStep == steps.lastIndex) "Done" else "Next")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        tour = false
+                        client.tourSeen()
+                    }
+                ) {
+                    Text("Skip")
+                }
+            },
+        )
+    }
     var exit by remember { mutableStateOf(false) }
-    BackHandler { if (panel.isNotEmpty()) panel = "" else exit = true }
+    BackHandler {
+        if (s.fullScreen) client.fullScreen(false)
+        else if (panel.isNotEmpty()) panel = "" else exit = true
+    }
     fun toggle(name: String) {
         panel = if (panel == name) "" else name
     }
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {
+        val roomHeight = maxHeight
         val phoneButtonWidth = (maxWidth - 60.dp) / 5
         val half =
             if (phone)
@@ -477,10 +723,19 @@ private fun StreamScreen(client: SillClient, s: ClientState) {
             else maxHeight / 2
         val barHeight = if (phone) 62.dp else if (portrait) 78.dp else 86.dp
         Column(Modifier.fillMaxSize()) {
-            if (!portrait) Toolbar(s, client, false, panel, { toggle(it) }, { view?.keyboard() })
+            if (!portrait && !hidden)
+                Toolbar(s, client, false, panel, { toggle(it) }, { view?.keyboard() })
             Box(
                 Modifier.fillMaxWidth()
-                    .then(if (portrait) Modifier.height(half) else Modifier.weight(1f))
+                    .then(
+                        if (portrait && !hidden)
+                            Modifier.height(
+                                if (phone && client.largerPicture && !s.desktop)
+                                    (roomHeight * 0.64f)
+                                else half
+                            )
+                        else Modifier.weight(1f)
+                    )
                     .padding(8.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .border(1.dp, Color.White.copy(alpha = .09f), RoundedCornerShape(12.dp))
@@ -509,7 +764,7 @@ private fun StreamScreen(client: SillClient, s: ClientState) {
                             fontSize = 15.sp,
                         )
                     }
-                if (s.offConsole)
+                if (s.offConsole && !s.offConsoleView)
                     Box(
                         Modifier.fillMaxSize().background(Color.Black),
                         contentAlignment = Alignment.Center,
@@ -520,6 +775,33 @@ private fun StreamScreen(client: SillClient, s: ClientState) {
                             color = Palette.text,
                         )
                     }
+                if (s.offConsoleView && !s.inPip)
+                    Text(
+                        "Viewing your account only — another user is on the Mac. Controls are unavailable.",
+                        Modifier.align(Alignment.TopCenter).background(Palette.bar).padding(12.dp),
+                        fontSize = 13.sp,
+                    )
+                if (s.fullScreen && !s.inPip) {
+                    Box(
+                        Modifier.align(Alignment.CenterStart)
+                            .width(28.dp)
+                            .fillMaxHeight()
+                            .pointerInput(Unit) {
+                                detectHorizontalDragGestures { change, amount ->
+                                    if (amount > 12) {
+                                        change.consume()
+                                        client.fullScreen(false)
+                                    }
+                                }
+                            }
+                    )
+                    TextButton(
+                        onClick = { client.fullScreen(false) },
+                        modifier = Modifier.align(Alignment.BottomStart),
+                    ) {
+                        Text("Show controls")
+                    }
+                }
                 (s.error ?: s.resolutionNotice)?.let {
                     Text(
                         it,
@@ -532,7 +814,7 @@ private fun StreamScreen(client: SillClient, s: ClientState) {
                     )
                 }
             }
-            if (portrait)
+            if (portrait && !hidden)
                 Column(
                     Modifier.weight(1f)
                         .fillMaxWidth()
@@ -577,7 +859,7 @@ private fun StreamScreen(client: SillClient, s: ClientState) {
                                                     "Apps" -> toggle("apps")
                                                     "Text size" -> toggle("scale")
                                                     "Keyboard" -> view?.keyboard()
-                                                    "Desktop" -> client.select(null)
+                                                    "Desktop" -> client.desktop()
                                                     else -> toggle("settings")
                                                 }
                                             },
@@ -594,7 +876,9 @@ private fun StreamScreen(client: SillClient, s: ClientState) {
                                             )
                                         else Text("Aa", fontSize = 20.sp)
                                         Text(
-                                            label,
+                                            if (label == "Desktop" && s.desktopDisplays > 1)
+                                                "Desktop ${s.desktopDisplay}"
+                                            else label,
                                             fontSize = 10.sp,
                                             maxLines = 1,
                                             softWrap = false,
@@ -680,9 +964,23 @@ private fun StreamScreen(client: SillClient, s: ClientState) {
                                         else Palette.control
                                     )
                                     .clickable {
-                                        if (key < 0) modifiers = modifiers xor mask
-                                        else {
+                                        if (key < 0) {
+                                            modifiers = modifiers xor mask
+                                            client.input(
+                                                Wire.key(
+                                                    when (-key) {
+                                                        17 -> 225
+                                                        18 -> 224
+                                                        19 -> 226
+                                                        else -> 227
+                                                    },
+                                                    modifiers and mask != 0L,
+                                                    modifiers,
+                                                )
+                                            )
+                                        } else {
                                             client.key(key, modifiers)
+                                            client.releaseModifiers()
                                             modifiers = 0
                                         }
                                     },
@@ -723,7 +1021,7 @@ private fun StreamScreen(client: SillClient, s: ClientState) {
                     )
                 }
         }
-        if (panel.isNotEmpty()) {
+        if (panel.isNotEmpty() && !hidden) {
             val top = if (portrait) half + 12.dp + barHeight + 8.dp else barHeight + 8.dp
             if (portrait) Box(Modifier.fillMaxWidth().height(half).clickable { panel = "" })
             Box(
@@ -758,7 +1056,18 @@ private fun StreamScreen(client: SillClient, s: ClientState) {
                                 panel = ""
                             },
                         )
-                    "settings" -> SettingsPanel(s, client, { panel = "" }, { client.disconnect() })
+                    "settings" ->
+                        SettingsPanel(
+                            s,
+                            client,
+                            { panel = "" },
+                            { client.disconnect() },
+                            {
+                                tourStep = 0
+                                tour = true
+                                panel = ""
+                            },
+                        )
                     "scale" ->
                         Panel {
                             Text("Text size", fontWeight = FontWeight.SemiBold)
@@ -857,8 +1166,14 @@ private fun Toolbar(
             }
         BarButton("Text size", null, panel == "scale", compact) { toggle("scale") }
         if (!portrait) BarButton("Keyboard", Icons.Outlined.Keyboard, false, compact, keyboard)
-        BarButton("Desktop", Icons.Outlined.DesktopWindows, s.desktop, compact) {
-            client.select(null)
+        BarButton(
+            if (s.desktopDisplays > 1) "Desktop ${s.desktopDisplay}/${s.desktopDisplays}"
+            else "Desktop",
+            Icons.Outlined.DesktopWindows,
+            s.desktop,
+            compact,
+        ) {
+            client.desktop()
         }
         BarButton("Settings", Icons.Outlined.Settings, panel == "settings", compact) {
             toggle("settings")
@@ -1067,9 +1382,11 @@ private fun SettingsPanel(
     client: SillClient,
     close: () -> Unit,
     disconnect: () -> Unit,
+    tour: () -> Unit,
 ) {
     var showLicenses by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val activity = LocalActivity.current as? MainActivity
     if (showLicenses) {
         val notices = remember {
             listOf("NOTICE.txt", "THIRD_PARTY_NOTICES.txt", "LICENSE.txt").joinToString("\n\n") {
@@ -1121,9 +1438,7 @@ private fun SettingsPanel(
             Text("Quality", fontSize = 14.sp)
             Box {
                 TextButton(onClick = { qualityOpen = true }) {
-                    Text(
-                        "${qualities.firstOrNull { it.second==mbps }?.first ?: "Custom"} — $mbps Mbps"
-                    )
+                    Text(qualities.firstOrNull { it.second == mbps }?.first ?: "Custom")
                     Icon(Icons.Outlined.ExpandMore, null)
                 }
                 DropdownMenu(qualityOpen, { qualityOpen = false }) {
@@ -1182,8 +1497,69 @@ private fun SettingsPanel(
                     client.send(17, Wire.json("virtualDisplay" to it))
                 }
         }
+        s.settingsNote?.let { Text(it, fontSize = 12.sp, color = Palette.muted) }
+        if (settings?.has("sendAudio") == true)
+            SettingSwitch("Send audio (all devices)", settings.optBoolean("sendAudio")) {
+                client.send(17, Wire.json("sendAudio" to it))
+            }
         HorizontalDivider(color = Palette.control)
         SectionLabel("THIS DEVICE")
+        var mute by remember { mutableStateOf(client.mute) }
+        var clipboard by remember { mutableStateOf(client.shareClipboard) }
+        var pip by remember { mutableStateOf(client.pipEnabled) }
+        var larger by remember { mutableStateOf(client.largerPicture) }
+        var hold by remember { mutableStateOf(client.holdToDrag) }
+        SettingSwitch("Mute on this device", mute) {
+            mute = it
+            client.preference("mute", it)
+        }
+        if (!client.audio.supported)
+            Text(
+                "This device does not advertise AAC-ELD audio decoding.",
+                fontSize = 12.sp,
+                color = Palette.muted,
+            )
+        (s.audioNote ?: s.settings?.optString("audioNote")?.takeIf { it.isNotEmpty() })?.let {
+            Text(it, fontSize = 12.sp, color = Palette.muted)
+        }
+        SettingSwitch("Share clipboard", clipboard) {
+            clipboard = it
+            client.preference("shareClipboard", it)
+        }
+        TextButton(
+            onClick = { client.paste() },
+            enabled = clipboard && s.clipboardGeneration >= 1 && !s.locked && !s.offConsole,
+        ) {
+            Text("Paste on Mac")
+        }
+        s.clipboardNote?.let { Text(it, fontSize = 12.sp, color = Palette.muted) }
+        SettingSwitch("Picture in Picture", pip) {
+            pip = it
+            client.preference("pip", it)
+        }
+        TextButton(
+            onClick = { activity?.enterPip() },
+            enabled = pip && !s.locked && !s.offConsole,
+        ) {
+            Text("Open Picture in Picture")
+        }
+        TextButton(
+            onClick = {
+                close()
+                client.fullScreen(true)
+            }
+        ) {
+            Text("Full Screen")
+        }
+        if (LocalConfiguration.current.smallestScreenWidthDp < 600)
+            SettingSwitch("Larger picture (portrait windows)", larger) {
+                larger = it
+                client.preference("largerPicture", it)
+            }
+        SettingSwitch("Hold trackpad to drag", hold) {
+            hold = it
+            client.preference("holdToDrag", it)
+        }
         SettingSwitch("Reverse scrolling", reverse) {
             reverse = it
             client.reverseScroll = it
@@ -1194,6 +1570,12 @@ private fun SettingsPanel(
             color = Palette.muted,
         )
         HorizontalDivider(color = Palette.control)
+        Text(
+            "Sill for Android ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+            fontSize = 12.sp,
+            color = Palette.muted,
+        )
+        TextButton(onClick = tour) { Text("Take the tour") }
         TextButton(onClick = { showLicenses = true }, modifier = Modifier.fillMaxWidth()) {
             Text("About and open-source licenses")
         }
@@ -1207,9 +1589,13 @@ private fun SettingsPanel(
 
 @Composable
 private fun SettingSwitch(label: String, value: Boolean, change: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier.fillMaxWidth()
+            .toggleable(value = value, role = Role.Switch, onValueChange = change),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Text(label, Modifier.weight(1f), fontSize = 14.sp)
-        Switch(checked = value, onCheckedChange = change)
+        Switch(checked = value, onCheckedChange = null)
     }
 }
 

@@ -37,3 +37,13 @@ PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS 
 LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+ZXing Android Embedded 4.3.0
+Copyright Journey Mobile, Inc. and contributors
+Apache License, Version 2.0
+https://github.com/journeyapps/zxing-android-embedded
+
+ZXing core
+Copyright ZXing authors
+Apache License, Version 2.0
+https://github.com/zxing/zxing

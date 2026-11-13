@@ -17,6 +17,8 @@ class SourceRecovery(private val resume: Source? = null) {
     private var userPending = false
     private var userTarget: Source? = null
     private var beforeChoice: Source? = null
+    private var grace = 2000L
+    private var retryWait = 10000L
 
     fun userChoice(target: Source? = null) {
         userPending = true
@@ -28,7 +30,10 @@ class SourceRecovery(private val resume: Source? = null) {
         missingSince = null
     }
 
-    fun observe(active: Source?, windows: Set<Long>, now: Long): Source? {
+    fun observe(active: Source?, windows: Set<Long>, now: Long, rttMs: Long? = null): Source? {
+        val rtt = (rttMs ?: 0).coerceIn(0, 60000)
+        grace = maxOf(2000, rtt * 3)
+        retryWait = maxOf(10000, rtt * 4)
         if (userPending) {
             if (active == null || (active == beforeChoice && active != userTarget)) return null
             userPending = false
@@ -60,12 +65,12 @@ class SourceRecovery(private val resume: Source? = null) {
             return null
         }
         val since = missingSince ?: now.also { missingSince = it }
-        return if (now - since >= 2000 && now >= retryAt) request(Source(), now) else null
+        return if (now - since >= grace && now >= retryAt) request(Source(), now) else null
     }
 
     private fun request(source: Source, now: Long): Source {
         retry = source
-        retryAt = now + 10_000
+        retryAt = now + retryWait
         missingSince = null
         return source
     }

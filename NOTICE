@@ -10,7 +10,8 @@ https://github.com/Saffsanity/sill
 Licensed under the Apache License, Version 2.0.
 
 The Android implementation is based on upstream commit
-41e8cb8801f8e9d387e27a0d498dee193d17e9ec.
+41e8cb8801f8e9d387e27a0d498dee193d17e9ec, with the 0.2.0 protocol and
+behavior update adapted from bf69067fe60348bfcf3d617086a8589fbdf8dbb6.
 Protocol definitions, pairing behavior, interface specifications, and recovery
 policies were adapted from Sources/StreamProtocol and iOSClient. The Swift
 behaviors were translated into Kotlin and integrated with Android platform APIs.

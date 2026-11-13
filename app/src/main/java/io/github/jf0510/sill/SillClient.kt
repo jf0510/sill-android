@@ -23,7 +23,15 @@ import kotlinx.coroutines.flow.update
 import org.json.JSONArray
 import org.json.JSONObject
 
-data class MacHost(val name: String, val host: String, val port: Int, val pin: String? = null) {
+data class MacHost(
+    val name: String,
+    val host: String,
+    val port: Int,
+    val pin: String? = null,
+    val recognition: String? = null,
+    val routes: List<String> = emptyList(),
+    val issuedAt: Double = 0.0,
+) {
     val address
         get() = "$host:$port"
 }
@@ -50,6 +58,24 @@ data class ClientState(
     val settings: JSONObject? = null,
     val locked: Boolean = false,
     val offConsole: Boolean = false,
+    val offConsoleView: Boolean = false,
+    val desktopDisplays: Int = 1,
+    val desktopDisplay: Int = 1,
+    val desktopNames: List<String> = emptyList(),
+    val clipboardGeneration: Int = 0,
+    val gestures: Int = 0,
+    val keyRepeat: Int = 0,
+    val audioNote: String? = null,
+    val clipboardNote: String? = null,
+    val settingsNote: String? = null,
+    val fullScreen: Boolean = false,
+    val inPip: Boolean = false,
+    val pairingLink: PairLink? = null,
+    val cursorImage: Bitmap? = null,
+    val cursorHotX: Float = 0f,
+    val cursorHotY: Float = 0f,
+    val cursorWidth: Float = 0f,
+    val cursorHeight: Float = 0f,
     val videoWidth: Int = 0,
     val videoHeight: Int = 0,
     val decoder: String = "",
@@ -82,6 +108,79 @@ class SillClient(app: Application) : AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences("macs", 0)
     private val _state = MutableStateFlow(ClientState(saved = loadSaved()))
     val state = _state.asStateFlow()
+    val audio =
+        AudioOutput(app) { note ->
+            _state.update { it.copy(audioNote = note.takeIf { it.isNotEmpty() }) }
+        }
+    var lastUse = android.os.SystemClock.elapsedRealtime()
+        private set
+
+    var modifierKeys = 0L
+    private var subscribedClipboard = false
+    private var pasteReceipt: ByteArray? = null
+    private var pendingSettings = 0
+    private var latestMenuToken = 0
+    var shareClipboard = prefs.getBoolean("shareClipboard", true)
+        private set
+
+    var mute = prefs.getBoolean("mute", false)
+        private set
+
+    var pipEnabled = prefs.getBoolean("pip", false)
+        private set
+
+    var largerPicture = prefs.getBoolean("largerPicture", false)
+        private set
+
+    var holdToDrag = prefs.getBoolean("holdToDrag", true)
+        private set
+
+    var showTour = !prefs.getBoolean("tour062", false)
+        private set
+
+    fun tourSeen() {
+        showTour = false
+        prefs.edit().putBoolean("tour062", true).apply()
+    }
+
+    fun preference(name: String, value: Boolean) {
+        prefs.edit().putBoolean(name, value).apply()
+        when (name) {
+            "shareClipboard" -> {
+                shareClipboard = value
+                syncClipboard()
+            }
+            "mute" -> {
+                mute = value
+                updateAudio()
+            }
+            "pip" -> pipEnabled = value
+            "largerPicture" -> largerPicture = value
+            "holdToDrag" -> holdToDrag = value
+        }
+    }
+
+    fun used() {
+        lastUse = android.os.SystemClock.elapsedRealtime()
+    }
+
+    fun fullScreen(value: Boolean) {
+        used()
+        _state.update { it.copy(fullScreen = value) }
+    }
+
+    fun pip(value: Boolean) {
+        _state.update { it.copy(inPip = value) }
+        syncClipboard()
+        updateAudio()
+    }
+
+    private fun updateAudio() {
+        val s = _state.value
+        audio.enabled =
+            !mute && (inForeground || s.inPip) && s.connected && !s.locked && !s.offConsole
+    }
+
     private val identity by lazy { Identity(app) }
     private val nsd = app.getSystemService(NsdManager::class.java)
     private var discovery: NsdManager.DiscoveryListener? = null
@@ -161,7 +260,7 @@ class SillClient(app: Application) : AndroidViewModel(app) {
             prefs.edit().putBoolean("reverseScroll", value).apply()
         }
 
-    var textScale: Double? = 1.0
+    var textScale: Double? = null
     var panelFPS = 60
         private set
 
@@ -205,7 +304,9 @@ class SillClient(app: Application) : AndroidViewModel(app) {
                 keyframeRecovery.consider(
                     now,
                     inForeground,
-                    s.connected && source(s) != null && !s.locked && !s.offConsole,
+                    s.connected &&
+                        source(s) != null &&
+                        (!s.locked && !s.offConsole || s.offConsoleView),
                     KeyframeRecovery.answerWait(worstRttMs),
                 )
         ) {
@@ -246,12 +347,14 @@ class SillClient(app: Application) : AndroidViewModel(app) {
 
     private fun recoverSource() {
         val s = _state.value
-        if (!s.connected || !inForeground || s.locked || s.offConsole) return
+        if (!s.connected || !inForeground || ((s.locked || s.offConsole) && !s.offConsoleView))
+            return
         sourceRecovery
             .observe(
                 source(s),
                 s.windows.map { it.id }.toSet(),
                 android.os.SystemClock.elapsedRealtime(),
+                worstRttMs,
             )
             ?.let {
                 android.util.Log.i("SillSession", "Auto source: ${it.window ?: "Desktop"}")
@@ -278,6 +381,7 @@ class SillClient(app: Application) : AndroidViewModel(app) {
         lowLatencyWifi(false)
         clearRealtime()
         video.reset()
+        audio.newSession()
         val goodbye = e as? HostGoodbye
         reconnectWanted =
             if (goodbye != null) ReconnectPolicy.retry(goodbye.reason, goodbye.retry)
@@ -318,6 +422,11 @@ class SillClient(app: Application) : AndroidViewModel(app) {
                         o.getString("host"),
                         o.getInt("port"),
                         o.getString("pin"),
+                        o.optString("recognition").takeIf { key -> key.isNotEmpty() },
+                        o.optJSONArray("routes")?.let { a ->
+                            (0 until a.length()).map { a.getString(it) }
+                        } ?: emptyList(),
+                        o.optDouble("issuedAt", 0.0),
                     )
                 }
             }
@@ -336,6 +445,9 @@ class SillClient(app: Application) : AndroidViewModel(app) {
                                 "host" to it.host,
                                 "port" to it.port,
                                 "pin" to it.pin,
+                                "recognition" to it.recognition,
+                                "routes" to JSONArray(it.routes),
+                                "issuedAt" to it.issuedAt,
                             )
                         }
                     )
@@ -358,6 +470,9 @@ class SillClient(app: Application) : AndroidViewModel(app) {
                                 "host" to it.host,
                                 "port" to it.port,
                                 "pin" to it.pin,
+                                "recognition" to it.recognition,
+                                "routes" to JSONArray(it.routes),
+                                "issuedAt" to it.issuedAt,
                             )
                         }
                     )
@@ -389,7 +504,24 @@ class SillClient(app: Application) : AndroidViewModel(app) {
                         main.post {
                             val address = info.host?.hostAddress
                             if (address != null && discovery != null) {
-                                val host = MacHost(info.serviceName, address, info.port)
+                                val tag =
+                                    info.attributes.entries
+                                        .firstOrNull { it.key.equals("r", true) }
+                                        ?.value
+                                        ?.toString(Charsets.UTF_8)
+                                val saved =
+                                    _state.value.saved.firstOrNull { h ->
+                                        tag != null &&
+                                            h.recognition?.let { RemoteInfo.recognizes(tag, it) } ==
+                                                true
+                                    }
+                                val host =
+                                    saved?.copy(host = address, port = info.port)
+                                        ?: MacHost(info.serviceName, address, info.port)
+                                if (saved != null) {
+                                    save(host)
+                                    if (currentHost?.pin == host.pin) currentHost = host
+                                }
                                 _state.update {
                                     it.copy(
                                         hosts = it.hosts.filter { h -> h.name != host.name } + host
@@ -480,6 +612,12 @@ class SillClient(app: Application) : AndroidViewModel(app) {
         runCatching { socket?.close() }
         socket = null
         video.reset()
+        audio.newSession()
+        subscribedClipboard = false
+        pasteReceipt = null
+        modifierKeys = 0
+        pendingSettings = 0
+        latestMenuToken = 0
         return generation
     }
 
@@ -584,6 +722,10 @@ class SillClient(app: Application) : AndroidViewModel(app) {
                                 host.copy(
                                     name = answer.optString("name", host.name),
                                     pin = Identity.b64(pin),
+                                    recognition =
+                                        answer.optString("recognitionKey").takeIf {
+                                            it.isNotEmpty()
+                                        },
                                 )
                             }
                     withContext(Dispatchers.Main) {
@@ -605,6 +747,109 @@ class SillClient(app: Application) : AndroidViewModel(app) {
             }
     }
 
+    fun offerPairLink(text: String) {
+        try {
+            val link = PairLink.parse(text)
+            _state.update { it.copy(pairingLink = link, error = null) }
+        } catch (e: Exception) {
+            _state.update { it.copy(error = e.message ?: "Invalid pairing link") }
+        }
+    }
+
+    fun dismissPairLink() {
+        _state.value.pairingLink?.secret?.fill(0)
+        _state.update { it.copy(pairingLink = null) }
+    }
+
+    fun pairLink() {
+        val link = _state.value.pairingLink ?: return
+        _state.update {
+            it.copy(
+                pairingLink = null,
+                busy = true,
+                error = null,
+                status = "Pairing with ${link.name}…",
+            )
+        }
+        val owner = resetConnection()
+        job =
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    var paired: MacHost? = null
+                    var failure: Exception = java.io.IOException("Mac is unreachable")
+                    for ((host, port) in link.routes) {
+                        if (owner != generation) throw CancellationException()
+                        val connection =
+                            try {
+                                identity.socket(host, port, true, link.pin) { adopt(it, owner) }
+                            } catch (e: Exception) {
+                                if (
+                                    e is CancellationException ||
+                                        e is javax.net.ssl.SSLHandshakeException
+                                )
+                                    throw e
+                                failure = e
+                                continue
+                            }
+                        connection.use { socket ->
+                            val reply =
+                                exchangePair(
+                                    socket,
+                                    "qr",
+                                    Identity.b64(
+                                        PairProof.proof(link.secret, identity.fingerprint, link.pin)
+                                    ),
+                                )
+                            require(reply.optBoolean("ok")) {
+                                "Pairing link expired or was refused. Open a fresh pairing code on the Mac."
+                            }
+                            require(
+                                MessageDigest.isEqual(
+                                    PairProof.proof(
+                                        link.secret,
+                                        identity.fingerprint,
+                                        link.pin,
+                                        true,
+                                    ),
+                                    Identity.unb64(reply.getString("proof")),
+                                )
+                            ) {
+                                "Mac pairing proof did not match."
+                            }
+                            paired =
+                                MacHost(
+                                    reply.optString("name", link.name),
+                                    host,
+                                    port,
+                                    Identity.b64(link.pin),
+                                    reply.optString("recognitionKey").takeIf { it.isNotEmpty() },
+                                    link.routes.map { "${it.first}|${it.second}" },
+                                )
+                        }
+                        break
+                    }
+                    val result = paired ?: throw failure
+                    withContext(Dispatchers.Main) {
+                        if (owner == generation) {
+                            save(result)
+                            connect(result)
+                        }
+                    }
+                } catch (e: Exception) {
+                    if (owner == generation && e !is CancellationException)
+                        _state.update {
+                            it.copy(
+                                busy = false,
+                                error = friendly(e),
+                                status = "Pairing did not finish.",
+                            )
+                        }
+                } finally {
+                    link.secret.fill(0)
+                }
+            }
+    }
+
     fun cancelPair() {
         reconnectWanted = false
         resetConnection()
@@ -615,6 +860,7 @@ class SillClient(app: Application) : AndroidViewModel(app) {
 
     fun connect(host: MacHost, automatic: Boolean = false) {
         if (!automatic) {
+            used()
             reconnectAttempt = 0
             resumeSource = null
         }
@@ -632,6 +878,19 @@ class SillClient(app: Application) : AndroidViewModel(app) {
                 error = null,
                 resolutionNotice = null,
                 settings = null,
+                locked = false,
+                offConsole = false,
+                offConsoleView = false,
+                clipboardGeneration = 0,
+                gestures = 0,
+                keyRepeat = 0,
+                desktopDisplays = 1,
+                desktopDisplay = 1,
+                desktopNames = emptyList(),
+                audioNote = null,
+                clipboardNote = null,
+                settingsNote = null,
+                cursorImage = null,
                 videoWidth = 0,
                 videoHeight = 0,
                 active = null,
@@ -646,15 +905,7 @@ class SillClient(app: Application) : AndroidViewModel(app) {
         job =
             viewModelScope.launch(Dispatchers.IO) {
                 try {
-                    val s =
-                        identity.socket(
-                            host.host,
-                            host.port,
-                            false,
-                            Identity.unb64(requireNotNull(host.pin)),
-                        ) {
-                            adopt(it, g)
-                        }
+                    val s = dial(host, g)
                     if (g != generation) {
                         s.close()
                         return@launch
@@ -667,6 +918,9 @@ class SillClient(app: Application) : AndroidViewModel(app) {
                                     "build" to BuildConfig.VERSION_NAME,
                                     "protocol" to Wire.PROTOCOL_VERSION,
                                     "device" to Build.MODEL,
+                                    "offConsoleView" to 1,
+                                    "audio" to
+                                        if (audio.supported) JSONArray(listOf("aac-eld")) else null,
                                 )
                                 .toString()
                                 .toByteArray(),
@@ -742,11 +996,38 @@ class SillClient(app: Application) : AndroidViewModel(app) {
                             desktop = a.has("desktop"),
                             locked = o.optBoolean("locked"),
                             offConsole = o.optBoolean("offConsole"),
+                            offConsoleView =
+                                ParityPolicy.viewingOffConsole(
+                                    o.optBoolean("locked"),
+                                    o.optBoolean("offConsole"),
+                                    o.optBoolean("offConsoleView"),
+                                ),
+                            clipboardGeneration = o.optInt("clipboard"),
+                            gestures = o.optInt("gestures"),
+                            keyRepeat = o.optInt("keyRepeat"),
+                            desktopDisplays = o.optInt("desktopDisplays", 1).coerceIn(1, 64),
+                            desktopDisplay =
+                                o.optInt("desktopDisplay", 1)
+                                    .coerceIn(1, o.optInt("desktopDisplays", 1).coerceIn(1, 64)),
+                            desktopNames =
+                                o.optJSONArray("desktopDisplayNames")?.let { a ->
+                                    (0 until minOf(a.length(), 64)).map { a.optString(it) }
+                                } ?: emptyList(),
+                            apps = if (o.optBoolean("locked")) emptyList() else old.apps,
+                            menus = if (o.optBoolean("locked")) null else old.menus,
+                            cursorImage = if (o.optBoolean("locked")) null else old.cursorImage,
                             thumbnails =
                                 old.thumbnails.filterKeys { id -> windows.any { it.id == id } },
                         )
                     }
                     reconnectAttempt = 0
+                    if (_state.value.offConsole) {
+                        moves.reset()
+                        moveTask?.let(main::removeCallbacks)
+                        moveTask = null
+                    }
+                    syncClipboard()
+                    updateAudio()
                     recoverSource()
                     considerKeyframe()
                     if (sourceTick == null) {
@@ -792,7 +1073,33 @@ class SillClient(app: Application) : AndroidViewModel(app) {
                 }
             }
             11 ->
-                if (m.payload.size == 8) {
+                if (m.payload.size == 16) {
+                    val owner = generation
+                    main.post {
+                        if (owner == generation && pasteReceipt?.contentEquals(m.payload) == true) {
+                            pasteReceipt = null
+                            main.postDelayed(
+                                {
+                                    val st = _state.value
+                                    if (
+                                        owner == generation &&
+                                            inForeground &&
+                                            shareClipboard &&
+                                            st.clipboardGeneration >= 1 &&
+                                            !st.locked &&
+                                            !st.offConsole
+                                    ) {
+                                        key(25, 1L shl 20)
+                                        _state.update {
+                                            it.copy(clipboardNote = "Pasted on ${it.macName}.")
+                                        }
+                                    }
+                                },
+                                50,
+                            )
+                        }
+                    }
+                } else if (m.payload.size == 8) {
                     val elapsed =
                         (System.nanoTime() / 1e9 - ByteBuffer.wrap(m.payload).double) * 1000
                     if (elapsed.isFinite() && elapsed >= 0) {
@@ -811,8 +1118,75 @@ class SillClient(app: Application) : AndroidViewModel(app) {
                         }
                     }
                 }
+            14 ->
+                if (m.payload.size > 16 && !_state.value.locked) {
+                    val b = ByteBuffer.wrap(m.payload)
+                    val x = b.float
+                    val y = b.float
+                    val w = b.float
+                    val h = b.float
+                    if (
+                        listOf(x, y, w, h).all { it.isFinite() } &&
+                            w > 0 &&
+                            h > 0 &&
+                            w <= 512 &&
+                            h <= 512
+                    )
+                        decodeBitmap(m.payload, 16)?.let { bitmap ->
+                            _state.update {
+                                it.copy(
+                                    cursorImage = bitmap,
+                                    cursorHotX = x,
+                                    cursorHotY = y,
+                                    cursorWidth = w,
+                                    cursorHeight = h,
+                                )
+                            }
+                        }
+                }
+            18 -> {
+                val envelope = json()
+                val host = currentHost
+                val verified = host?.pin?.let { RemoteInfo.verified(envelope, Identity.unb64(it)) }
+                val owner = generation
+                if (host != null && verified != null)
+                    main.post { if (owner == generation) rememberRemote(host, verified) }
+            }
+            32 -> {
+                val text = json().optString("text")
+                val owner = generation
+                main.post {
+                    val st = _state.value
+                    if (
+                        owner == generation &&
+                            inForeground &&
+                            !_state.value.inPip &&
+                            subscribedClipboard &&
+                            shareClipboard &&
+                            !st.locked &&
+                            !st.offConsole &&
+                            ParityPolicy.clipboard(text) != null
+                    ) {
+                        getApplication<Application>()
+                            .getSystemService(android.content.ClipboardManager::class.java)
+                            .setPrimaryClip(
+                                android.content.ClipData.newPlainText("From ${st.macName}", text)
+                            )
+                        _state.update { it.copy(clipboardNote = "Copied from ${it.macName}.") }
+                    }
+                }
+            }
+            43 -> audio.accept(m.payload)
             16 -> {
-                _state.update { it.copy(settings = json()) }
+                val settings = json()
+                _state.update {
+                    it.copy(
+                        settings = settings,
+                        settingsNote =
+                            if (settings.optInt("answering", -1) == pendingSettings) null
+                            else it.settingsNote,
+                    )
+                }
                 val g = generation
                 main.post {
                     if (g == generation)
@@ -827,7 +1201,30 @@ class SillClient(app: Application) : AndroidViewModel(app) {
                     o.optString("message", "The Mac ended this session (${o.optString("reason")})."),
                 )
             }
-            24 -> _state.update { it.copy(menus = json()) }
+            24 -> {
+                val incoming = json()
+                if (!_state.value.locked)
+                    _state.update { old ->
+                        val previous = old.menus
+                        val same = previous?.optInt("version", -1) == incoming.optInt("version", -2)
+                        if (
+                            incoming.has("answering") &&
+                                incoming.optInt("answering") < latestMenuToken
+                        )
+                            old
+                        else {
+                            val merged =
+                                if (same && !incoming.has("menus")) JSONObject(previous.toString())
+                                else JSONObject()
+                            if (incoming.has("menus")) {
+                                merged.remove("items")
+                                merged.remove("menu")
+                            }
+                            incoming.keys().forEach { key -> merged.put(key, incoming.get(key)) }
+                            old.copy(menus = merged)
+                        }
+                    }
+            }
             26 -> {
                 val o = json()
                 val owner = generation
@@ -921,7 +1318,35 @@ class SillClient(app: Application) : AndroidViewModel(app) {
         return BitmapFactory.decodeByteArray(bytes, offset, bytes.size - offset)
     }
 
-    fun send(kind: Int, obj: JSONObject) = send(kind, obj.toString().toByteArray())
+    fun send(kind: Int, obj: JSONObject) {
+        if (kind in listOf(17, 25, 27)) {
+            if (_state.value.locked || _state.value.offConsole) return
+            if (!obj.has("token")) obj.put("token", nextToken())
+            if (kind == 17) {
+                pendingSettings = obj.getInt("token")
+                _state.update { it.copy(settingsNote = "Applying Mac settings…") }
+                val token = pendingSettings
+                val owner = generation
+                main.postDelayed(
+                    {
+                        if (
+                            owner == generation &&
+                                pendingSettings == token &&
+                                _state.value.settingsNote != null
+                        )
+                            _state.update {
+                                it.copy(
+                                    settingsNote =
+                                        "No confirmation from the Mac. Check the settings and try again."
+                                )
+                            }
+                    },
+                    8000,
+                )
+            } else latestMenuToken = obj.getInt("token")
+        }
+        send(kind, obj.toString().toByteArray())
+    }
 
     fun send(kind: Int, payload: ByteArray = byteArrayOf()) {
         val s = socket ?: return
@@ -946,7 +1371,8 @@ class SillClient(app: Application) : AndroidViewModel(app) {
             main.post { if (owner == generation) input(obj) }
             return
         }
-        if (!_state.value.connected || _state.value.offConsole) return
+        if (!_state.value.connected || _state.value.offConsole || _state.value.inPip) return
+        used()
         val now = android.os.SystemClock.elapsedRealtime()
         emitInputs(moves.offer(obj, obj.optJSONObject("pointer")?.optString("_0") == "move", now))
         moveTask?.let(main::removeCallbacks)
@@ -964,6 +1390,8 @@ class SillClient(app: Application) : AndroidViewModel(app) {
     }
 
     fun select(id: Long?) {
+        if (_state.value.locked || _state.value.offConsole) return
+        used()
         sourceRecovery.userChoice(SourceRecovery.Source(id))
         resumeSource = SourceRecovery.Source(id)
         send(6, Wire.source(id))
@@ -972,13 +1400,149 @@ class SillClient(app: Application) : AndroidViewModel(app) {
     }
 
     fun launch(bundle: String) {
+        if (_state.value.locked || _state.value.offConsole) return
+        used()
         sourceRecovery.userChoice()
         resumeSource = null
         send(7, Wire.json("bundleID" to bundle))
     }
 
-    fun windowCommand(id: Long, action: String) =
-        send(15, Wire.json("id" to id, "action" to action))
+    fun windowCommand(id: Long, action: String) {
+        if (!_state.value.locked && !_state.value.offConsole)
+            send(15, Wire.json("id" to id, "action" to action))
+    }
+
+    fun desktop() {
+        used()
+        val s = _state.value
+        if (ParityPolicy.nextDisplay(s.desktop, s.desktopDisplays, s.locked, s.offConsole)) {
+            send(47)
+            video.awaitKeyframe()
+        } else select(null)
+    }
+
+    fun gesture(name: String, fingers: Int) {
+        val s = _state.value
+        if (s.gestures >= 1 && !s.locked && !s.offConsole) {
+            used()
+            send(28, Wire.json("gesture" to name, "fingers" to fingers))
+        }
+    }
+
+    private fun syncClipboard() {
+        val s = _state.value
+        val wanted =
+            shareClipboard &&
+                inForeground &&
+                !s.inPip &&
+                s.connected &&
+                s.clipboardGeneration >= 1 &&
+                !s.locked &&
+                !s.offConsole
+        if (wanted != subscribedClipboard) {
+            if (s.connected && s.clipboardGeneration >= 1)
+                send(32, if (wanted) JSONObject() else Wire.json("stop" to true))
+            subscribedClipboard = wanted
+        }
+        if (!wanted) pasteReceipt = null
+    }
+
+    fun paste() {
+        used()
+        val s = _state.value
+        if (
+            !inForeground ||
+                s.inPip ||
+                !shareClipboard ||
+                s.clipboardGeneration < 1 ||
+                s.locked ||
+                s.offConsole ||
+                pasteReceipt != null
+        )
+            return
+        val clip =
+            getApplication<Application>()
+                .getSystemService(android.content.ClipboardManager::class.java)
+                .primaryClip
+        val text =
+            if (clip != null && clip.itemCount > 0) clip.getItemAt(0).text?.toString().orEmpty()
+            else ""
+        val bytes = ParityPolicy.clipboard(text)
+        if (bytes == null) {
+            _state.update {
+                it.copy(
+                    clipboardNote = "Clipboard is empty or the text is too long (256 KB maximum)."
+                )
+            }
+            return
+        }
+        val nonce = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }
+        pasteReceipt = nonce
+        send(32, bytes)
+        send(10, nonce)
+        _state.update { it.copy(clipboardNote = "Sending to ${it.macName}…") }
+        val owner = generation
+        main.postDelayed(
+            {
+                if (owner == generation && pasteReceipt === nonce) {
+                    pasteReceipt = null
+                    _state.update {
+                        it.copy(clipboardNote = "The Mac did not confirm the copy. Try again.")
+                    }
+                }
+            },
+            8000,
+        )
+    }
+
+    private fun rememberRemote(host: MacHost, info: JSONObject) {
+        val current = _state.value.saved.firstOrNull { it.pin == host.pin } ?: return
+        val issued = info.optDouble("issuedAt", 0.0)
+        if (!issued.isFinite() || issued <= current.issuedAt) return
+        val port = info.optInt("remotePort", 7455)
+        val list = info.optJSONArray("addresses") ?: JSONArray()
+        val fresh =
+            (0 until minOf(list.length(), 32)).mapNotNull { i ->
+                val a = list.optJSONObject(i) ?: return@mapNotNull null
+                val h = a.optString("host")
+                val p = a.optInt("port", port)
+                if (h.isBlank() || h.length > 253 || '|' in h || p !in 1..65535) null else "$h|$p"
+            }
+        val updated =
+            current.copy(routes = ParityPolicy.addresses(current.routes, fresh), issuedAt = issued)
+        save(updated)
+        currentHost = updated
+    }
+
+    private fun dial(host: MacHost, owner: Int): SSLSocket {
+        val latest = _state.value.saved.firstOrNull { it.pin == host.pin } ?: host
+        val routes = (listOf("${latest.host}|${latest.port}") + latest.routes).distinct()
+        var failure: Exception = java.io.IOException("No address for this Mac")
+        for (route in routes) {
+            if (owner != generation) throw CancellationException("Dial replaced")
+            val parts = route.split('|')
+            if (parts.size != 2) continue
+            try {
+                return identity.socket(
+                    parts[0],
+                    parts[1].toInt(),
+                    false,
+                    Identity.unb64(requireNotNull(host.pin)),
+                ) {
+                    adopt(it, owner)
+                }
+            } catch (e: Exception) {
+                if (
+                    e is CancellationException ||
+                        e is javax.net.ssl.SSLHandshakeException ||
+                        e is javax.net.ssl.SSLPeerUnverifiedException
+                )
+                    throw e
+                failure = e
+            }
+        }
+        throw failure
+    }
 
     fun viewport(w: Double, h: Double) {
         panelWidth = w
@@ -1008,6 +1572,15 @@ class SillClient(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun releaseModifiers() {
+        val held = modifierKeys
+        modifierKeys = 0
+        for ((bit, usage) in listOf(17 to 225, 18 to 224, 19 to 226, 20 to 227)) if (
+            held and (1L shl bit) != 0L
+        )
+            input(Wire.key(usage, false, 0))
+    }
+
     fun key(hid: Int, modifiers: Long = 0) {
         input(Wire.key(hid, true, modifiers))
         input(Wire.key(hid, false, modifiers))
@@ -1027,7 +1600,11 @@ class SillClient(app: Application) : AndroidViewModel(app) {
     }
 
     fun background() {
+        if (_state.value.inPip) return
+        releaseModifiers()
         inForeground = false
+        syncClipboard()
+        updateAudio()
         keyframeRecovery.leftForeground()
         considerKeyframe()
         lowLatencyWifi(false)
@@ -1035,7 +1612,15 @@ class SillClient(app: Application) : AndroidViewModel(app) {
     }
 
     fun foreground() {
+        if (!inForeground) used()
         inForeground = true
+        discovery?.let { runCatching { nsd.stopServiceDiscovery(it) } }
+        discovery = null
+        resolving.clear()
+        resolvingNow = false
+        browse()
+        syncClipboard()
+        updateAudio()
         scheduleReconnect()
         if (_state.value.connected || _state.value.busy) lowLatencyWifi(true)
         video.resumeVideo()
@@ -1045,7 +1630,7 @@ class SillClient(app: Application) : AndroidViewModel(app) {
     private fun friendly(e: Exception) =
         when (e) {
             is java.net.SocketTimeoutException ->
-                "The Mac did not respond. Check that Sill is running and both devices are on the same network."
+                "The Mac did not respond. Check Sill on the Mac. For remote access, turn on your VPN on both this device and the Mac."
             else -> e.cause?.message ?: e.message ?: "Couldn't connect to the Mac."
         }
 
@@ -1056,6 +1641,7 @@ class SillClient(app: Application) : AndroidViewModel(app) {
         discovery = null
         writer.shutdownNow()
         video.close()
+        audio.close()
     }
 
     fun usbDiagnostic(port: Int) {
